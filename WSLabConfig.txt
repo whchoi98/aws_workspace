@@ -1,0 +1,75 @@
+#######################################################################################
+File Version: 1
+Author: Greg LaVigne 
+Initial:  02/10/2019 v1	(GPL)	Created for customer WorkSpaces Immersion Day
+ModHist: 
+	
+################################
+URLS to reference:
+PDF of LabGuide:		http://workspaces.awseuclabfiles.com/WorkSpaces_Lab.pdf
+
+Lab files to download:		http://workspaces.awseuclabfiles.com/
+
+Original			http://13.59.219.174/
+
+AWS Console:			http://console.aws.amazon.com/
+
+Google Chrome:		 	http://www.google.com/chrome 
+
+Notepad++: 			https://notepad-plus-plus.org/download
+#######################################################################################
+
+STEP 6:
+#9-Page 12
+CF Stack Name:		WSLabVPC
+ClassB:			Pick any number between 0-255
+#11-Page 13
+Key:			WSLab
+Key Value:		your name or initials
+
+STEP 7:
+#5-Page 16
+Directory DNS Name:	Workspaces.labX.com
+Directory NetBios name	WorkSpaces
+Directory Description	An AWS MMAD instance used for the workspaces.labX.com lab domain. Created by yourname on MM/DD/YY
+Admin password:		P@ssw0rd (or whatever you wish)
+Confirm password:	same entry as above
+
+STEP 8:
+#9-Page 22:
+UserName:		ImageBuilder_sa
+First Name:		ImageBuilder
+Last Name:		ServiceAcct
+Email:			An email address you have access to
+
+STEP 9: (testuser1)
+#50-Page 37
+First Name:		Test
+Last Name:		User1
+Full Name:		Test User1
+UserLogonName:		testuser1
+UserLogonName (prew2k): testuser1
+#53,Page 38
+Email:			An email address you have access to
+
+STEP 9: (testuser2)
+#50-Page 37
+First Name:		Test
+Last Name:		User1
+Full Name:		Test User1
+UserLogonName:		testuser1
+UserLogonName (prew2k): testuser1
+#53,Page 38
+Email:			An email address you have access to
+
+STEP 10:
+#5, Page 39
+Image Name:		AWSWin10_Chrome_NotepadPP_vMMDDYY
+Description:		AWS Windows 10 with Chrome.NotepadPP.RSAT -patched thru MMDDYY-created by (your initials)
+
+#10, Page 41
+Bundle Name:		LabXXX_AWSWin10_Perf
+Description:		LabXXX AWS Windows10 Bundle running Performance HW-Apps include Chrome.NotepadPP.RSAT-Created by GPL on 02/10/19
+Bundle Type:		Performance
+Root Volune Size:	80
+User Volume Size:	50

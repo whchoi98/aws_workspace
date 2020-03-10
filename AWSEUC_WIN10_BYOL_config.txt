@@ -1,0 +1,661 @@
+﻿<#Filename:AWSEUC_WIN10_BYOL_config.ps1
+
+.Synopsis:
+Created for Amazon WorkSpaces BYOL image creation of optimized and configured Window 10 OS only image prior to upload into AWS
+Validated using: 	Win10 Pro v1903 .iso
+					Win10 Ent v1903 .iso
+                    Win10 Ent v1909 .iso
+.Execution:
+    On machine while logged in as WorkSpaces_BYOL local admin users, make a c:\temp folder
+	Populate this script to that c:\temp folder to execute
+	Open PowerShell or PowerShell ISE (my preference) as Administrator
+    Enable execution of PowerShell scripts:
+    PS> Set-ExecutionPolicy Unrestricted -Scope CurrentUser and enter "A" when prompted
+    Unblock PowerShell scripts and modules within this directory:
+    PS> ls -Recurse *.ps*1 | Unblock-File
+    Run this command ".\AWSEUC_WIN10_BYOL_config.ps1"
+	Reboot VM when prompted at conclusion and remove mounting of Win10 vXXXX.iso from VM through hypervisor being used
+    
+.Description:
+This script is intended to configure and optimiaze a base Windows 10 OS as expected prior to running the BYOL_CHECKER AND SYSPREP.
+	The script configures the following:
+	-Makes/validates c:\temp directory
+	-Makes/validates c:\Byol directory
+	-Validates WorkSpaces_BYOL user is created AND is a member of the local administrators group
+	-Uninstall Universal Windows Platform Apps (UWP) for local AND all Users (Logs PRE and Post removal)
+	-Uninstall Microsoft Store Apps
+	-Disables and sets startup to disabled for services not required
+	-Enables RDP
+	-Disable WindowsUpdates
+	-Disables Windows Firewall Public profile
+	-Sets timezone to RealtimeUniversal
+	-Sets PowerPlan to High Performance
+	-Reboots machine
+	-Creates a number of log, transcript and output files in C:\Byol folder.
+
+.Assumptions:
+	- Customer has built an OS Only image of Windows 10
+	- During that process, customer created a local admin user of WorkSpaces_BYOL and has the password recorded
+	- customer prior to running this script, manually ran Windows Update and rebooted (multiple times) + rebooted to ensure base OS is patched and is as current as possible
+	- customer did NOT install ANY additional runtimes or software applications
+	
+.References: (I shamelessly borrowed ideas and code from the following so Thanks!!!)
+-Optimizations and code snippets:
+	https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-vdi-recommendations
+	https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-vdi-recommendations-1803
+	https://social.technet.microsoft.com/wiki/contents/articles/39386.windows-10-managing-optional-features-with-powershell.aspx
+	https://github.com/W4RH4WK/Debloat-Windows-10
+	https://amazonprojects.corp.amazon.com/sites/AWSWORK/SpecialistSA/_layouts/15/WopiFrame2.aspx?sourcedoc=%2Fsites%2FAWSWORK%2FSpecialistSA%2FSiteAssets%2FWorkSpaces%20Specialists%20SA%20Notebook&action=edit&wd=target%28Useful%20Info%2Eone%7C6C6B7D70-F022-468B-9B83-E88C65983A62%2F%29
+	https://github.com/cluberti/VDI
+	https://github.com/cluberti/VDI/blob/master/ConfigAsVDI.ps1
+	https://superuser.com/questions/1016076/remove-appx-package-for-all-users
+	https://social.technet.microsoft.com/Forums/en-US/9cb41ec6-a7a5-46b0-838c-dce2dce2fd83/problem-with-removeappxprovisionedpackage-on-a-fresh-install-of-windows-10-enterprise-build-1803?forum=win10itprosetup
+	https://github.com/DominikBritz/PowerShell/blob/master/Scripts/Set-Registry.ps1
+	https://d2zdcak60k1ljz.cloudfront.net/BYOLChecker.zip
+-Optimization references:
+    https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-vdi-recommendations-1803
+    https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-vdi-recommendations
+    https://www.brianmadden.com/opinion/VDI-image-optimizers-Always-useful-and-now-even-more-important
+    https://techzone.vmware.com/creating-optimized-windows-image-vmware-horizon-virtual-desktop#1150976
+    https://flings.vmware.com/vmware-os-optimization-tool
+    https://techcommunity.microsoft.com/t5/core-infrastructure-and-security/windows-10-build-1803-vdi-optimization-script-primer/ba-p/377613
+    https://github.com/TheVDIGuys/Windows_10_VDI_Optimize
+    https://mulcas.com/vdi-lab-2018-part-11-create-a-windows-10-golden-image/
+    https://virtualfeller.com/2017/04/25/optimize-vdi-windows-10-services-original-anniversary-and-creator-updates/
+
+.Enhancements to be added:
+	-Add intelligent and dynamic rebooting
+		-include creation of reboot flag and check for flag and the begin of the file and reboot
+	-Autopatch and updates and reboot
+	-Add dialog window/msgbox to record admin local user password for uploading
+	-Convert Appx removal process to a function and add intelligence try/case validation
+	-Convert disable service to a function 
+	-Add my Lastmile preimaging cleanup PS1 components
+	-Review Juaire's optimization configs for possible inclusion
+	-Add the various output files to this header section (c:\BYOL\*.*)
+	-Move C:\BYOL to c:\windows\byol or ??
+	-Add Auto Download and unpacking for byolcheck.zip
+	-Add reg key to record image creation info (Date, Version, Machine Name, etc.)
+ 
+.Author: Greg LaVigne  
+   Initial:  02/02/2019 (GPL) Created and used for Win10 v1809
+   ModHist:  11/14/2019 (GPL) Greatly enhanced and tweaked for Win10 v1903
+ v1.1909.03  02/06/2020 (GPL) Updated for Win10 v1909: (enabled WinRM), fixed OS checks, standardized various logs and added section headers and resequenced based on that.
+ v1.1909.041 02/24/2020 (GPL) revamped removal of Universal Apps and associated pre & post logging & added existing logfile check to log function. 
+				Also changed the Optional Customization & Optimizations section reg keys to use set-regkey function and added error checking to appx removal.
+
+#>
+################################################################################################################################
+#						Set Script Variables and define Parameters	  			                                               #
+################################################################################################################################
+$scriptName = $MyInvocation.MyCommand.Name
+$scriptpath = Get-Location
+$scriptVersion = "1.1909.04"
+$scriptVerDate = "2020.02.21"
+$Date = Get-Date -Format yyyyMMdd-HHmmss
+$LogDir = "c:\BYOL\"
+$TempDir = "c:\Temp\"
+$CompName = $ENV:ComputerName
+$strIam = $env:username
+$LogFile = $LogDir +'W10_AWSBYOL_config-'+ $CompName +'-'+$Date+'.log'
+$PS1TransciptFile = $LogDir + $scriptName +'-transcript-'+$Date+'.log'
+$User = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$global:SuccessLabel = "[SUCCESS]"
+$global:FailureLabel = "[FAIL]"
+
+################################################################################################################################
+#						 Script Function Defintions																			   #	
+################################################################################################################################
+function log($string, $color){
+$LogTime = (Get-Date -f g)
+   if ($Color -eq $null) {$color = "white"}
+		write-host $string -foregroundcolor $color
+   $LogEntry = $LogTime +': '+$string
+   if (Test-Path $Logfile) {
+        $LogEntry | out-file -Filepath $Logfile -append
+    } else  {
+        write-host "Creating $Logfile as it doesn't exist."
+        $LogEntry | out-file -Filepath $Logfile        
+    }    
+$LogTime = @()
+}
+
+function CreateDirectory($cre8dir){
+   Write-Host "Checking existance of folder: $cre8dir" -ForgroundColor yellow
+   if (Test-Path $cre8dir)
+    {
+		Log("$cre8dir Folder already exists so no need to create it.") red
+    }
+   else 
+    {
+        New-Item -ItemType Directory -Path $cre8dir -Force
+        Start-Sleep 2
+        Log ("$cre8dir Folder Created Successfully") green
+	}
+}
+
+<# Function "borrowed" from:https://github.com/DominikBritz/PowerShell/blob/master/Scripts/Set-Registry.ps1
+.EXAMPLE 
+    Set-Registry -RegKey HKLM:\SomeKey -RegValue SomeValue -RegData 1111 -RegType DWord
+    This will create the key SomeKey in HKLM:\. There it will create a value SomeValue of the type DWord with the data 1111.
+#>
+Function Set-Registry
+{
+    [CmdletBinding()]
+    PARAM
+    (
+        $RegKey,
+        $RegValue,
+        $RegData,
+        [ValidateSet('String','DWord','Binary','ExpandString','MultiString','None','QWord','Unknown')]
+        $RegType = 'String'    
+    )
+
+    If (-not $RegValue)
+    {
+        If (-not (Test-Path $RegKey))
+        {
+            Log("The key $RegKey does not exist. Try to create it.") yellow
+            Try
+            {
+                New-Item -Path $RegKey -Force
+            }
+            Catch
+            {
+                Write-Error -Message $_
+            }
+            Log("Creation of $RegKey was successful") green
+        }        
+    }
+
+    If ($RegValue)
+    {
+        If (-not (Test-Path $RegKey))
+        {
+            Log("The key $RegKey does not exist. Try to create it.") yellow
+            Try
+            {
+                New-Item -Path $RegKey -Force
+                Set-ItemProperty -Path $RegKey -Name $RegValue -Value $RegData -Type $RegType -Force
+            }
+            Catch
+            {
+                Write-Error -Message $_
+            }
+            Log("Creation of $RegKey was successful") green
+        }
+        Else 
+        {
+            Write-Verbose "The key $RegKey already exists. Try to set value"
+            Try
+            {
+                Set-ItemProperty -Path $RegKey -Name $RegValue -Value $RegData -Type $RegType -Force
+            }
+            Catch
+            {
+                Write-Error -Message $_
+            }
+            Log("Creation of $RegValue in $RegKey was successful") green
+        }
+    }
+}
+
+#Disable WindowsUpdates  -Borrowed code from BYOL_Checkert.ps1
+function Disable_Updates {
+          # Desired Service Name and its StartType Mode
+            $global:GoodService = @(
+                [PsCustomObject]@{
+                    Name      = "wuauserv"
+                    StartMode = "Disabled"
+                }
+                ,
+                [PsCustomObject]@{
+                    Name      = "TrustedInstaller"
+                    StartMode = "Manual"
+                }
+            )
+           $ServiceStateList = @()
+            foreach ($svc in $global:GoodService) {
+                $ServiceState = Get-WmiObject -ClassName Win32_Service | Where-Object Name -eq $svc.Name | Select-Object Name, StartMode
+                $ServiceStateList = $ServiceStateList + $ServiceState
+            }
+            $global:BadService = @()
+            $global:BadService = Compare-Object $global:GoodService $ServiceStatelist -Property StartMode, Name | Select-Object Name -Unique -ExpandProperty Name
+            if ($global:BadService -eq $null) {
+                log ("$global:SuccessLabel Update service status has passed the check")
+                return $global:PASSED
+            }
+            else {
+                Log ("$global:FailureLabel Update service status failed. Service(s): $global:BadService did not meet the startup criteria.")
+                return $global:WARNING
+            }
+          fix {
+            foreach ($service in $global:BadService) {
+                try {
+                    # Stopping the process, if it is running, before disabling it
+                    $ServicePID = (get-wmiobject win32_service | Where-Object { $_.name -eq $service}).processID
+                    if ($ServicePID -ne 0) {
+                        Log ("$global:FailureLabel $service processID is $ServicePID. Stopping the service")
+                        taskkill /pid $ServicePID /f /t
+                    }
+                    else {
+                        Log("$global:SuccessLabel $service processID is 0 (null)") 
+                    }
+                    # Disabling the service
+                    Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+                    Set-Service -Name $service -StartupType ($global:GoodService | Where-Object {$_.Name -eq $service}).StartMode
+                }
+                catch {
+                    $global:OutputBox.AppendText("$global:FailureText `nFailed to Auto disable Windows Updates. Please try to manualy disable Windows Updates.")
+                }
+            }
+        }
+  
+}
+
+#Disable WindowsFirewall for public profile  -Borrowed code from BYOL_Checker.ps1
+function Disable_Firewall {
+            $location = "Registry::HKLM\SYSTEM\ControlSet001\Services\SharedAccess\Parameters\FirewallPolicy"
+            $publicFirewall = Get-ItemProperty -path $location\PublicProfile -ErrorAction SilentlyContinue
+            if ($publicFirewall.enablefirewall -eq 1)
+            {
+                Log ("Public Firewall Profile is turned ON so turning off") RED
+                netsh advfirewall set publicprofile state off
+            }
+            else {
+                Log ("Public Firewall Profile is turned OFF so doing nothing") Green
+            }
+}
+
+################################################################################################################################
+#						 Execution of MAIN Script 																			   #	
+################################################################################################################################
+CreateDirectory($LogDir)
+CreateDirectory($TempDir)
+Start-Transcript -Path $PS1TransciptFile -Append
+
+# Script details: Recording path and scriptname
+log ("This script name is: $scriptName") gray
+log ("This script version is: $scriptversion") gray
+log ("This script version date is: $scriptverdate") gray
+log ("The full script path is: $scriptpath") gray
+log ("The execution started: $Date") gray
+log ("The script logfile to be created is: $LogFile") gray
+log ("The user princpal being used for execution is: $User") cyan
+log ("The user context: $strIam") cyan
+log ("The ComputerName is: $CompName") cyan
+log ("---------------------------") Magenta
+
+# Get Windows generic info
+[String]$OSCaption = (Get-WmiObject -class Win32_OperatingSystem).Caption
+Write-host "This system is running: $OSCaption" #Good
+# Get Windows Edition
+[String]$Edition = (Get-WmiObject Win32_OperatingSystem).OperatingSystemSKU
+#See OSSKU number values under OperatingSystemSKU here: https://docs.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem?redirectedfrom=MSDN
+Write-host "This system is running Windows Edition: $Edition"
+# Get Windows Release version
+[String]$OS = (Get-Item "HKLM:SOFTWARE\Microsoft\Windows NT\CurrentVersion").GetValue('ReleaseID')
+Write-host "This system is running Windows 10 Release: $OS" #Good
+# Get Windows Build Number
+[String]$OSFullVerNumber = (Get-WmiObject Win32_OperatingSystem).Version
+Write-host "This system is running Windows Version Number: $OSFullVerNumber"
+[String]$OSBuildNumber = (Get-WmiObject Win32_OperatingSystem).BuildNumber
+Write-host "This system is running Windows Build Number: $OSBuildNumber"
+log ("---------------------------") Magenta
+
+########################################################################
+#						ReQUIRED BYOL CONFIGURATIONS                   #     
+########################################################################
+# Enable RDP (required so WorkSpaces service team can configure and integrate image for use with the WorkSpaces managed service)
+log ("Enable RDP as required so WorkSpaces service team can configure and integrate image for use with the WorkSpaces managed service")
+Set-Registry -RegKey "HKLM:\System\CurrentControlSet\Control\Terminal Server" -RegValue "fDenyTSConnections" -RegData 0 -RegType DWord
+log ("---------------------------") Magenta
+
+#Checking that WorkSpaces_BYOL is a member of the Local Admin Group 
+log ("Checking that WorkSpaces_BYOL is a member of the Local Admin Group ")
+$user = "$env:COMPUTERNAME\WorkSpaces_BYOL"
+$group = 'Administrators'
+$isInGroup = (Get-LocalGroupMember $group).Name -contains $user
+LOG ("The Workspaces_Byol user is in the local computers admin group, true or false: $IsInGroup")
+log ("---------------------------") Magenta
+
+# Call function to disable Windows Firewall for public profile
+log ("Disabling Windows Firewall for public profile")
+Disable_Firewall
+log ("---------------------------") Magenta
+
+# Set TimeZone to RealTimeUniversal
+log ("Setting TimeZone to RealTimeUniversal")
+Set-Registry -RegKey "HKLM:\System\CurrentControlSet\Control\TimeZoneInformation" -RegValue "RealTimeIsUniversal" -RegData "1" -RegType DWORD
+log ("---------------------------") Magenta
+
+# Set power scheme High Perf:
+log ("Setting VM to High Performance Power Scheme")
+Try
+{
+   POWERCFG.exe -SetActive '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+}
+Catch
+{
+	Write-Error -Message $_
+}
+log ("Successfull Set PowerPlan to High Performance") green
+# Validation check
+$pp = Get-CimInstance -Name root\cimv2\power -Class win32_PowerPlan -Filter "ElementName like 'High%'"|select "ElementName", "IsActive"
+log ("The current High Performance Power plan is: $pp")
+log ("---------------------------") Magenta
+
+########################################################################################
+#						Managing Windows Services                                      #     
+########################################################################################
+# Enable WINRM service (found to be required for successful creation of v1909 custom image.  Can be managed via GPO once WS is provisioned with custom image-gpl 020620
+log ("Enabling WinRM service..")
+Enable-PSRemoting -SkipNetworkProfileCheck –force
+Set-Service WinRM -StartMode Automatic
+Start-Sleep -s 5
+$svcWinRM = Get-WmiObject -Class win32_service | Where-Object {$_.name -like "WinRM"}
+$svcWinRMStart = $svcWinRM.Startmode
+$svcWinRMState = $svcWinRM.State
+log ("$svcWinRMStart  $svcWinRMState")
+log ("---------------------------") Magenta
+
+<#
+Stop and Disable unused Windows Services
+
+    AllJoyn Router Service 
+    Application Layer Gateway Service 
+    Bluetooth Handsfree Service - BthHFSrv   <-Service not found removed by gpl on 10-1-19
+    Bluetooth Support Service 
+    BranchCache Service 
+    Home Group Listener Service - HomeGroupListener <-Service not found removed by gpl on 10-1-19
+    Home Group Provider Service - HomeGroupProvider <-Service not found removed by gpl on 10-1-19
+    Internet Connection Sharing (ICS) Service 
+    Windows Media Player Network Sharing Service 
+    Windows Mobile Hotspot Service 
+    WLAN AutoConfig Service 
+    WWAN AutoConfig Service 
+    Xbox Live Auth Manager Service 
+    Xbox Live Game Save Service 
+    Xbox Live Networking Service Service
+	Windows Update
+	TrustedInstaller
+#>
+
+Log ("Stopping and disabling unneeded services") cyan
+$services = @(
+"AJRouter"
+"ALG"
+"bthserv"
+"PeerDistSvc"
+"SharedAccess"
+"WMPNetworkSvc"
+"WlanSvc"
+"WwanSvc"
+"XblAuthManager"
+"XblGameSave"
+"XboxNetApiSvc"
+"wuauserv"			#Windows Update
+<#"TrustedInstaller"  #Windows Modules Installer#>
+)
+
+foreach ($service in $services) {
+log ("------------") cyan
+Log ("PROCESSING Service: $service")
+    #Get-Service -Name $service | Stop-Service -PassThru | Set-Service -StartupType Disabled
+	Log ("Trying to stop $service")
+	Try
+	{
+		$StopSvc = Get-Service -Name $service | Stop-Service -PassThru  -ErrorAction Stop
+	}
+	Catch
+	{
+		$ErrorMessage = $_.Exception.Message
+		$FailedItem = $_.Exception.ItemName
+		log ("The $service service failed to STOP! $FailedItem was recorded and the error message was $ErrorMessage") red
+		Break
+	}
+	finally {
+        log ("---") darkblue
+    }
+
+	Log ("Now trying to disable $service")
+	Try
+	{
+		$StartSvc = Get-Service -Name $service | Set-Service -StartupType Disabled -PassThru -ErrorAction Stop
+	}
+	Catch
+	{
+		$ErrorMessage = $_.Exception.Message
+		$FailedItem = $_.Exception.ItemName
+		log ("Unable to set the startup type to disable for $service. $FailedItem was recorded and the error message was $ErrorMessage") red
+		Break
+	}
+	finally {
+        log ("---") darkblue
+    }
+}
+log ("------------") cyan
+log ("---------------------------") Magenta
+
+########################################################################################
+#						Managing Windows & Universal APPS                              #     
+########################################################################################
+<#
+https://adamtheautomator.com/remove-built-in-windows-10-apps-powershell/
+https://win10faq.com/how-to-remove-the-xbox-app-from-windows-10/
+https://anotheritguy.com/index.php/2017/07/controlling-windows-10-bloatware-apps/
+https://github.com/Digressive/Remove-UWP-Apps/blob/master/Remove-UWP-Apps.ps1
+https://gal.vin/2017/04/06/removing-uwp-apps-mdt/
+https://github.com/Disassembler0/Win10-Initial-Setup-Script
+#>
+<#
+Record Universal Applications present prior to removing
+#>
+
+#Current User:
+log ("Generating list of Appx packages installed for current user")
+$curUsrAppxLog=$LogDir +'PreCurAppx.log' 
+$CUAppx = Get-AppxPackage | select name |Sort Name|Format-Table -Expand Both -wrap|out-file -filepath $curUsrAppxLog
+$CUAppx = Get-Content $curUsrAppxLog$CUAppx | foreach{ $_.Trim()} | Out-File $curUsrAppxLog
+(gc $curUsrAppxLog)|?{$_.trim()-ne""}|set-content $curUsrAppxLog       #removes any blank lines as this file is read when processing the removal of Universal Apps for the current user (workspaces_byol)
+(gc $curUsrAppxLog)|?{$_.trim()-ne"Name"}|set-content $curUsrAppxLog   #removes the NAME column header/title line
+(gc $curUsrAppxLog)|?{$_.trim()-ne "----"}|set-content $curUsrAppxLog  #removes the NAME dashes column header
+Start-Sleep -s 3
+log ("---------------------------") Yellow
+
+#All Users
+$AllUserAppxLog=$LogDir +'PreAllAppx.log' 
+log ("Generating list of all Appx packages for all users")
+get-appxpackage -AllUsers |select Name,PackageUserInformation |Sort Name|Format-Table -Expand Both -wrap|out-file -filepath $AllUserAppxLog
+Start-Sleep -s 3
+log ("---------------------------") Yellow
+
+#NOTE: Provisioned apps are the UWP apps that will be installed for all new users when they first log on.
+log ("Generating list of provisioned Appx packages")
+$PvAxLog=$LogDir +'PreProvAppx.log' 
+get-provisionedappxpackage -online|select displayname |out-file -filepath $PvAxLog
+Start-Sleep -s 3
+log ("---------------------------") Yellow
+
+log ("---------------------------") Magenta
+
+<#
+Removes specified UWP/Microsoft Store in-box apps/Universal Applications
+#>
+log ("Removing Apps...") Green 
+
+# Create array to hold list of apps to remove
+$appname = @(
+"Microsoft.BingWeather"
+"Microsoft.GetHelp"
+"Microsoft.Getstarted"
+"Microsoft.Messaging"
+"Microsoft.Microsoft3DViewer"
+"Microsoft.MicrosoftOfficeHub"
+"Microsoft.MicrosoftSolitaireCollection"
+"Microsoft.MicrosoftStickyNotes"
+"Microsoft.MSPaint"
+"Microsoft.Office.OneNote"
+"Microsoft.OneConnect"
+"Microsoft.People"
+"Microsoft.Print3D"
+"Microsoft.ScreenSketch"
+"Microsoft.SkypeApp"
+"Microsoft.StorePurchaseApp"
+"Microsoft.Wallet"
+"Microsoft.Windows.Photos"
+"Microsoft.WindowsCamera"
+"microsoft.windowscommunicationsapps"
+"Microsoft.WindowsFeedbackHub"
+"Microsoft.WindowsMaps"
+"Microsoft.WindowsSoundRecorder"
+"Microsoft.WindowsStore"
+"Microsoft.Xbox.TCUI"
+"Microsoft.XboxApp"
+"Microsoft.XboxGameOverlay"
+"Microsoft.XboxGamingOverlay"
+"Microsoft.XboxIdentityProvider"
+"Microsoft.XboxSpeechToTextOverlay"
+"Microsoft.YourPhone"
+"Microsoft.ZuneMusic"
+"Microsoft.ZuneVideo"
+#added by GPL on 10-01-2019
+"Microsoft.DesktopAppInstaller"
+"Microsoft.HEIFImageExtension"
+"Microsoft.MixedReality.Portal"
+"Microsoft.VP9VideoExtensions"
+"Microsoft.WebMediaExtensions"
+"Microsoft.WebpImageExtension"
+"Microsoft.WindowsAlarms"
+"Microsoft.WindowsCalculator"
+ )
+   
+ForEach($app in $appname){
+    Log("Trying to process: $app") Green
+    $PackageName = (Get-AppxPackage -AllUsers | Where-Object {$_.Name -like $App}).PackageFullName
+    #$ProPackageFullName = (Get-AppxProvisionedPackage -Online | Where {$_.PackageName -like $App}).PackageName
+    $ProPackageFullName = (Get-AppxProvisionedPackage -online | where {$_.Displayname -eq $App}).PackageName
+    Start-Sleep -s 2
+# Remove apps from All users
+        log ("Processing AllUser AppxPackage: $PackageName") Yellow
+        If ($PackageName) 
+            {
+            log ("Removing "+ $app +" from All users") Yellow
+            log ("---Start 1st Run----") cyan
+            Remove-AppxPackage -AllUsers -Package $PackageName #-ErrorAction SilentlyContinue|#| Out-Null
+            Start-Sleep -s 2
+            log ("---Done with 1st Run----") cyan
+            $2ndTryName = (Get-AppxPackage -AllUsers | Where-Object {$_.Name -like $App})
+              log ("---Start 2nd Run----") gray
+              log ("TRY2-Removing "+ $2ndTryName +" from All users") Yellow
+                If ($2ndTryName) {
+                Remove-AppxPackage -AllUsers -Package $PackageName #| Out-Null
+                Start-Sleep -s 2
+                }Else{
+                  log ("Must have just succesfully removed package: $App") gray
+                } #end 2nd run
+              log ("---Done with 2nd Run----") gray
+        } Else { 
+           log ("Unable to find package: $App") Red
+        }
+        log ("---------------------------") Magenta
+        
+# Remove apps from provisioned apps list so they don't reinstall on new users
+        log ("Processing ProvisionedPackage: $ProPackageFullName") Yellow
+        If ($ProPackageFullName) {
+            log ("Removing " + $app + " from provisioned apps list so they don't reinstall on new users") Yellow
+            #Remove-AppxProvisionedPackage -Online -PackageName $ProPackageFullName #| Out-Null
+            Get-AppxProvisionedPackage -online | where {$_.Displayname -eq $App}|Remove-AppxProvisionedPackage -AllUsers -Online
+        } Else { 
+            log ("Unable to find provisioned package: $App") RED 
+        }
+        $PackageName=@()
+        $2ndTryName=@()
+        $ProPackageFullName=@()
+log ("---------------------------") Magenta
+}
+
+# Remove apps from current user
+$CUApplist = Get-Content "$curUsrAppxLog"
+ForEach ($CUApp in $CUApplist) {    $CUPackageFullName = (Get-AppxPackage $CUApp).PackageFullName    $CUPackageFullName=$CUPackageFullName.TrimEnd()    $CUPackageFullName2='"'+$CUPackageFullName+'"'    log ("Removing AppxPackage: "+ $CUApp +" from current user") Yellow    if ($CUPackageFullName) {        log ("AppxPackage Full Name is: $CUPackageFullName2") Yellow        log ("---Start 1st Run----") cyan        remove-AppxPackage -package $CUPackageFullName2 -ErrorAction SilentlyContinue| Out-File -FilePath $Logfile -Append         start-sleep -Seconds 2        log ("---Done with 1st Run----") cyan
+            $2ndTryCU = (Get-AppxPackage $CUApp).PackageFullName
+            log ("---Start 2nd Run----") gray
+            If ($2ndTryCU) {                log ("TRY2-AppxPackage Full Name is: $2ndTryCU") Yellow                remove-AppxPackage -package $CUPackageFullName2 -ErrorAction SilentlyContinue| Out-File -FilePath $Logfile -Append                 Start-Sleep -s 2
+                }Else{
+                  log ("Must have just succesfully removed package: $CUPackageFullName2") gray
+                } #end 2nd run
+                log ("---Done with 2nd Run----") gray    } else {      log ("Unable to find package: $CUApp") Red    }
+    $CUPackageFullName=@()
+    $CUPackageFullName2=@()
+    $2ndTryCU=@()
+    log ("---------------------------") Magenta
+}
+
+<#
+Record Universal Applications present post removal
+#>
+
+#Current User:
+log ("Generating list of Appx packages installed for current user")
+$curUsrAppxLog2=$LogDir +'PostCurAppx.log' 
+$CUAppx2 = Get-AppxPackage | select name |Sort Name|Format-Table -Expand Both -wrap|out-file -filepath $curUsrAppxLog2
+Start-Sleep -s 3
+log ("---------------------------") Yellow
+
+#All Users
+$AllUserAppxLog2=$LogDir +'PostAllAppx.log' 
+log ("Generating list of all Appx packages for all users")
+get-appxpackage -AllUsers |select Name,PackageUserInformation |out-file -filepath $AllUserAppxLog2
+Start-Sleep -s 3
+log ("---------------------------") Yellow
+
+#NOTE: Provisioned apps are the UWP apps that will be installed for all new users when they first log on.
+log ("Generating list of provisioned Appx packages")
+$PvAxLog2=$LogDir +'PostProvAppx.log' 
+get-provisionedappxpackage -online|select displayname |out-file -filepath $PvAxLog2
+Start-Sleep -s 3
+log ("---------------------------") Yellow
+
+log ("---------------------------") Magenta
+########################################################################################
+#						Optional Customization & OPtimizations                         #     
+########################################################################################
+# Disable New Network Dialog:   #https://github.com/cluberti/VDI/ConfigAsVDI.ps1
+log ("Disabling New Network Dialog...") 
+Set-Registry -RegKey "HKLM:\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff"
+log ("---------------------------") Magenta
+
+# Disable Cortana: #https://github.com/cluberti/VDI/ConfigAsVDI.ps1
+Log ("Disabling Cortana...")
+Set-Registry -RegKey "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
+Set-Registry -RegKey "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -RegValue "AllowCortana" -RegData "0" -RegType DWORD
+log ("---------------------------") Magenta
+
+# Disable IE First Run Wizard: #https://github.com/cluberti/VDI/ConfigAsVDI.ps1
+Log ("Disabling IE First Run Wizard...")
+Set-Registry -RegKey "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer"
+Set-Registry -RegKey "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Main"
+Set-Registry -RegKey "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Main" -RegValue "DisableFirstRunCustomize" -RegData "1" -RegType DWORD
+log ("---------------------------") Magenta
+
+######################
+# END OF MAIN SCRIPT #
+######################
+# Shutdown the VM
+# REBOOT THE WORKSPACE AND EXECUTE SCRIPT AGAIN
+# http://msdn.microsoft.com/en-us/library/system.windows.forms.messagebox.aspx
+$MsgBMain = New-Object 'System.Windows.Forms.Form'
+$MsgBMain.TopMost = $true
+$msgBoxInput =  [System.Windows.forms.MessageBox]::Show($MsgBMain,'The script has completed configuring the system. It now must be shutdown and the .iso detached from the CD-ROM prior to running the BYOL_Checker and Sysprep. Click OK to Shutdown now.','Shutdown VM','OKCancel','Information')
+  switch  ($msgBoxInput) {
+	'OK' {
+		log ("The System will shut down now") green
+		Stop-Transcript
+		Stop-Computer -Force
+	}
+    'Cancel' {
+		log ("The system shutdown has been canceled") red
+		Stop-Transcript
+	}
+  }
+
